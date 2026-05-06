@@ -23,6 +23,36 @@ object ClientMain {
                 val alias = p["alias"] ?: die("--alias required")
                 println(HttpClient.post("/close", """{"alias":"$alias"}"""))
             }
+            "query" -> {
+                val p = parseFlags(args, 1)
+                val alias = p["alias"] ?: die("--alias required")
+                val asJson = p.containsKey("json")
+                val sql = parsePositional(args, 1) ?: die("SQL argument required")
+                fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+                val body = """{"alias":"${esc(alias)}","sql":"${esc(sql)}","json":$asJson}"""
+                println(HttpClient.post("/query", body))
+            }
+            "exec" -> {
+                val p = parseFlags(args, 1)
+                val alias = p["alias"] ?: die("--alias required")
+                val sql = parsePositional(args, 1) ?: die("SQL argument required")
+                fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+                val body = """{"alias":"${esc(alias)}","sql":"${esc(sql)}"}"""
+                println(HttpClient.post("/exec", body))
+            }
+            "schema" -> {
+                val p = parseFlags(args, 1)
+                val alias = p["alias"] ?: die("--alias required")
+                fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+                println(HttpClient.post("/schema", """{"alias":"${esc(alias)}"}"""))
+            }
+            "describe" -> {
+                val p = parseFlags(args, 1)
+                val alias = p["alias"] ?: die("--alias required")
+                val table = p["table"] ?: die("--table required")
+                fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")
+                println(HttpClient.post("/describe", """{"alias":"${esc(alias)}","table":"${esc(table)}"}"""))
+            }
             else -> {
                 System.err.println("""{"error":"unknown subcommand: ${args[0]}"}""")
                 System.exit(1)
@@ -30,26 +60,34 @@ object ClientMain {
         }
     }
 
-    private fun parseFlags(args: Array<String>, start: Int): Map<String, String> {
-        val result = mutableMapOf<String, String>()
+    private data class ParsedArgs(val flags: Map<String, String>, val positionals: List<String>)
+
+    // Flags in this set never consume the next token as their value.
+    private val BOOL_FLAGS = setOf("json", "password-stdin")
+
+    private fun parse(args: Array<String>, start: Int): ParsedArgs {
+        val flags = mutableMapOf<String, String>()
+        val positionals = mutableListOf<String>()
         var i = start
         while (i < args.size) {
             val arg = args[i]
             if (arg.startsWith("--")) {
                 val key = arg.removePrefix("--")
-                if (i + 1 < args.size && !args[i + 1].startsWith("--")) {
-                    result[key] = args[i + 1]
-                    i += 2
+                if (key in BOOL_FLAGS || i + 1 >= args.size || args[i + 1].startsWith("--")) {
+                    flags[key] = ""; i++
                 } else {
-                    result[key] = ""
-                    i++
+                    flags[key] = args[i + 1]; i += 2
                 }
             } else {
-                i++
+                positionals += arg; i++
             }
         }
-        return result
+        return ParsedArgs(flags, positionals)
     }
+
+    // Kept for backward-compat with existing call sites.
+    private fun parseFlags(args: Array<String>, start: Int) = parse(args, start).flags
+    private fun parsePositional(args: Array<String>, start: Int) = parse(args, start).positionals.firstOrNull()
 
     private fun buildJsonOpen(alias: String, jdbcUrl: String, user: String, password: String): String {
         fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"")

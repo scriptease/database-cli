@@ -31,4 +31,9 @@ object Pools {
         pools.values.forEach { it.close() }
         pools.clear()
     }
+
+    fun <T> withConn(alias: String, block: (java.sql.Connection) -> T): T {
+        val ds = lock.withLock { pools[alias] ?: error("alias '$alias' not open") }
+        return ds.connection.use(block)
+    }
 }
