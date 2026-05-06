@@ -1,5 +1,8 @@
 package com.scriptease.jdbccli.daemon
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import org.eclipse.jetty.io.Content
 import org.eclipse.jetty.server.Handler
 import org.eclipse.jetty.server.Request
 import org.eclipse.jetty.server.Response
@@ -44,13 +47,49 @@ object DaemonMain {
     }
 }
 
+@Serializable
+private data class OpenReq(val alias: String, val jdbcUrl: String, val user: String = "", val password: String = "")
+
+@Serializable
+private data class CloseReq(val alias: String)
+
 object Router : Handler.Abstract() {
+    private val json = Json { ignoreUnknownKeys = true }
+
     override fun handle(request: Request, response: Response, callback: Callback): Boolean {
         val path = request.httpURI.path
         val method = request.method
         return when {
             method == "GET" && path == "/ping" -> {
                 sendText(response, callback, "ok")
+                true
+            }
+            method == "GET" && path == "/list" -> {
+                val aliases = Pools.list()
+                val body = aliases.joinToString(",", "[", "]") { "\"$it\"" }
+                sendJson(response, callback, body)
+                true
+            }
+            method == "POST" && path == "/open" -> {
+                val body = Content.Source.asString(request, Charsets.UTF_8)
+                val req = json.decodeFromString<OpenReq>(body)
+                try {
+                    Pools.open(req.alias, req.jdbcUrl, req.user, req.password)
+                    sendJson(response, callback, """{"ok":true}""")
+                } catch (e: Exception) {
+                    sendError(response, callback, 400, e.message ?: "open failed")
+                }
+                true
+            }
+            method == "POST" && path == "/close" -> {
+                val body = Content.Source.asString(request, Charsets.UTF_8)
+                val req = json.decodeFromString<CloseReq>(body)
+                try {
+                    Pools.close(req.alias)
+                    sendJson(response, callback, """{"ok":true}""")
+                } catch (e: Exception) {
+                    sendError(response, callback, 400, e.message ?: "close failed")
+                }
                 true
             }
             else -> {
@@ -77,7 +116,8 @@ object Router : Handler.Abstract() {
     }
 
     fun sendError(response: Response, callback: Callback, status: Int, msg: String) {
-        val bytes = """{"error":"$msg"}""".toByteArray(Charsets.UTF_8)
+        val escaped = msg.replace("\"", "\\\"")
+        val bytes = """{"error":"$escaped"}""".toByteArray(Charsets.UTF_8)
         response.status = status
         response.headers.put("Content-Type", "application/json; charset=utf-8")
         response.headers.put("Content-Length", bytes.size.toString())
