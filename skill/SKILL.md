@@ -1,6 +1,6 @@
 ---
 name: jdbc-cli
-description: Query and modify SQL databases over JDBC with persistent sessions backed by a resident daemon. Use for ad-hoc queries, schema inspection, transactions across multiple agent steps, and repeat-shape query loops where JVM and connect cold-start would dominate. Bundled drivers (v1): MySQL, PostgreSQL, SQLite.
+description: "Query and modify SQL databases over JDBC with persistent sessions backed by a resident daemon. Use for ad-hoc queries, schema inspection, transactions across multiple agent steps, and repeat-shape query loops where JVM and connect cold-start would dominate. Bundled drivers (v1): MySQL, PostgreSQL, SQLite."
 ---
 
 # jdbc-cli
