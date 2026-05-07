@@ -55,7 +55,8 @@ private data class OpenReq(
     val jdbcUrl: String,
     val user: String = "",
     val password: String = "",
-    val passwordKeychain: String = ""
+    val passwordKeychain: String = "",
+    val readOnly: Boolean = false
 )
 
 @Serializable
@@ -116,7 +117,7 @@ object Router : Handler.Abstract() {
                         req.passwordKeychain.isNotEmpty() -> Keychain.lookup(req.passwordKeychain)
                         else -> req.password
                     }
-                    Pools.open(req.alias, req.jdbcUrl, req.user, password)
+                    Pools.open(req.alias, req.jdbcUrl, req.user, password, req.readOnly)
                     sendJson(response, callback, """{"ok":true}""")
                 } catch (e: Exception) {
                     sendError(response, callback, 400, e.message ?: "open failed")
@@ -156,6 +157,7 @@ object Router : Handler.Abstract() {
                 val body = Content.Source.asString(request, Charsets.UTF_8)
                 val req = json.decodeFromString<ExecReq>(body)
                 try {
+                    if (Pools.isReadOnly(req.alias)) error("alias '${req.alias}' is read-only")
                     val rows = Pools.withConn(req.alias) { conn ->
                         conn.createStatement().use { stmt -> stmt.executeUpdate(req.sql) }
                     }
@@ -209,6 +211,7 @@ object Router : Handler.Abstract() {
                 val body = Content.Source.asString(request, Charsets.UTF_8)
                 val req = json.decodeFromString<BeginReq>(body)
                 try {
+                    if (Pools.isReadOnly(req.alias)) error("alias '${req.alias}' is read-only")
                     Pools.begin(req.alias)
                     sendJson(response, callback, """{"ok":true}""")
                 } catch (e: Exception) {
@@ -220,6 +223,7 @@ object Router : Handler.Abstract() {
                 val body = Content.Source.asString(request, Charsets.UTF_8)
                 val req = json.decodeFromString<CommitReq>(body)
                 try {
+                    if (Pools.isReadOnly(req.alias)) error("alias '${req.alias}' is read-only")
                     Pools.commit(req.alias)
                     sendJson(response, callback, """{"ok":true}""")
                 } catch (e: Exception) {
@@ -231,6 +235,7 @@ object Router : Handler.Abstract() {
                 val body = Content.Source.asString(request, Charsets.UTF_8)
                 val req = json.decodeFromString<RollbackReq>(body)
                 try {
+                    if (Pools.isReadOnly(req.alias)) error("alias '${req.alias}' is read-only")
                     Pools.rollback(req.alias)
                     sendJson(response, callback, """{"ok":true}""")
                 } catch (e: Exception) {
@@ -253,14 +258,15 @@ object Router : Handler.Abstract() {
                                 }
                             }
                             "exec" -> {
+                                if (Pools.isReadOnly(op.alias)) error("alias '${op.alias}' is read-only")
                                 val rows = Pools.withConn(op.alias) { conn ->
                                     conn.createStatement().use { stmt -> stmt.executeUpdate(op.sql) }
                                 }
                                 """{"rowsAffected":$rows}"""
                             }
-                            "begin" -> { Pools.begin(op.alias); """{"ok":true}""" }
-                            "commit" -> { Pools.commit(op.alias); """{"ok":true}""" }
-                            "rollback" -> { Pools.rollback(op.alias); """{"ok":true}""" }
+                            "begin" -> { if (Pools.isReadOnly(op.alias)) error("alias '${op.alias}' is read-only"); Pools.begin(op.alias); """{"ok":true}""" }
+                            "commit" -> { if (Pools.isReadOnly(op.alias)) error("alias '${op.alias}' is read-only"); Pools.commit(op.alias); """{"ok":true}""" }
+                            "rollback" -> { if (Pools.isReadOnly(op.alias)) error("alias '${op.alias}' is read-only"); Pools.rollback(op.alias); """{"ok":true}""" }
                             else -> """{"error":"unknown op: ${op.op.replace("\"","\\\"")}}"""
                         }
                     } catch (e: Exception) {

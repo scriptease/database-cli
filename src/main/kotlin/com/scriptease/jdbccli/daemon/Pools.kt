@@ -9,10 +9,13 @@ object Pools {
     private val lock = ReentrantLock()
     private val pools = mutableMapOf<String, HikariDataSource>()
     private val txConns = mutableMapOf<String, java.sql.Connection>()
+    private val readOnlyAliases = mutableSetOf<String>()
 
     fun list(): List<String> = lock.withLock { pools.keys.toList() }
 
-    fun open(alias: String, jdbcUrl: String, user: String, password: String) = lock.withLock {
+    fun isReadOnly(alias: String): Boolean = lock.withLock { alias in readOnlyAliases }
+
+    fun open(alias: String, jdbcUrl: String, user: String, password: String, readOnly: Boolean = false) = lock.withLock {
         if (pools.containsKey(alias)) error("alias '$alias' already open")
         val cfg = HikariConfig().apply {
             this.jdbcUrl = jdbcUrl
@@ -21,11 +24,13 @@ object Pools {
             maximumPoolSize = 5
         }
         pools[alias] = HikariDataSource(cfg)
+        if (readOnly) readOnlyAliases += alias
     }
 
     fun close(alias: String) = lock.withLock {
         if (txConns.containsKey(alias)) error("alias '$alias' has an active transaction — rollback first")
         val ds = pools.remove(alias) ?: error("alias '$alias' not found")
+        readOnlyAliases -= alias
         ds.close()
     }
 
@@ -54,6 +59,7 @@ object Pools {
         txConns.clear()
         pools.values.forEach { it.close() }
         pools.clear()
+        readOnlyAliases.clear()
     }
 
     fun <T> withConn(alias: String, block: (java.sql.Connection) -> T): T {

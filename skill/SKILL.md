@@ -10,6 +10,13 @@ under launchd; each `jdbc-cli <subcmd>` is a short-lived call that hits
 the daemon over a Unix socket. Connection pools (HikariCP) are kept warm
 **per alias** between calls.
 
+## Help
+
+```bash
+jdbc-cli --help                  # list all subcommands and global flags
+jdbc-cli <subcommand> --help     # flags and usage for a specific subcommand
+```
+
 ## When to use
 
 - You need to run more than one SQL query in a row against the same DB.
@@ -53,6 +60,13 @@ jdbc-cli open  --alias prod-shop \
                --jdbc-url jdbc:mysql://localhost:3306/shop \
                --user root \
                --password-stdin                              # OR --password-keychain
+
+# Open read-only — exec/begin/commit/rollback are rejected by the daemon for this alias
+jdbc-cli open  --alias prod-shop-ro \
+               --jdbc-url jdbc:mysql://localhost:3306/shop \
+               --user root \
+               --password-keychain jdbc-cli/prod-shop \
+               --read-only
 
 # Read
 jdbc-cli query --alias prod-shop "SELECT id, name FROM users LIMIT 10"
@@ -157,6 +171,7 @@ connection.
 | Pitfall                                  | Correct approach                                           |
 | ---------------------------------------- | ---------------------------------------------------------- |
 | `--password 'secret'` on argv            | Visible in `ps`. Use `--password-stdin` or `--password-keychain`. |
+| `exec` on a read-only alias              | Daemon returns `{"error":"alias '…' is read-only"}`. Open with `--read-only` intentionally to enforce safety; don't use it if you need writes. |
 | Forgetting `close`                       | Leaks a Hikari pool. Always pair `open`/`close`.           |
 | Transaction across two terminals         | One alias = one tx state. Use the same alias for all steps.|
 | "no suitable driver" after install       | Shadow `mergeServiceFiles()` missing. Re-run `./gradlew shadowJar` and reinstall. |

@@ -19,7 +19,7 @@ bash scripts/install.sh
 Verify the daemon is up:
 
 ```sh
-jdbc-cli ping   # → pong
+jdbc-cli ping   # → ok
 ```
 
 Restart if needed:
@@ -30,6 +30,13 @@ launchctl kickstart -k gui/$(id -u)/com.scriptease.jdbc-cli
 
 Logs: `~/.jdbc-cli/log`
 
+## Help
+
+```sh
+jdbc-cli --help                  # list all subcommands
+jdbc-cli open --help             # flags for a specific subcommand
+```
+
 ## First run
 
 ```sh
@@ -37,35 +44,44 @@ Logs: `~/.jdbc-cli/log`
 security add-generic-password -s jdbc-cli/mydb -a myuser -w mysecret
 
 # Open a connection pool
-jdbc-cli open mydb \
-  --url "jdbc:mysql://localhost:3306/myschema" \
+jdbc-cli open \
+  --alias mydb \
+  --jdbc-url "jdbc:mysql://localhost:3306/myschema" \
   --user myuser \
   --password-keychain jdbc-cli/mydb
 
+# Open a read-only connection (blocks exec/begin/commit/rollback)
+jdbc-cli open \
+  --alias mydb-ro \
+  --jdbc-url "jdbc:mysql://localhost:3306/myschema" \
+  --user myuser \
+  --password-keychain jdbc-cli/mydb \
+  --read-only
+
 # Run a query (TSV with header by default)
-jdbc-cli query mydb "SELECT id, name FROM users LIMIT 5"
+jdbc-cli query --alias mydb "SELECT id, name FROM users LIMIT 5"
 
 # Typed JSON output
-jdbc-cli query mydb --json "SELECT * FROM orders WHERE id = 1"
+jdbc-cli query --alias mydb --json "SELECT * FROM orders WHERE id = 1"
 
 # Explore schema
-jdbc-cli schema mydb            # list tables
-jdbc-cli describe mydb users    # columns for a table
+jdbc-cli schema   --alias mydb              # list tables
+jdbc-cli describe --alias mydb --table users  # columns for a table
 
 # Write
-jdbc-cli exec mydb "UPDATE users SET active = 1 WHERE id = 42"
+jdbc-cli exec --alias mydb "UPDATE users SET active = 1 WHERE id = 42"
 
 # Transaction
-jdbc-cli begin mydb
-jdbc-cli exec  mydb "INSERT INTO events (type) VALUES ('login')"
-jdbc-cli commit mydb            # or: jdbc-cli rollback mydb
+jdbc-cli begin  --alias mydb
+jdbc-cli exec   --alias mydb "INSERT INTO events (type) VALUES ('login')"
+jdbc-cli commit --alias mydb     # or: jdbc-cli rollback --alias mydb
 
 # Batch (NDJSON — one op per line, results streamed back as NDJSON)
 printf '{"op":"query","sql":"SELECT 1"}\n{"op":"query","sql":"SELECT 2"}\n' \
-  | jdbc-cli batch mydb
+  | jdbc-cli batch --alias mydb
 
 # Done — release the pool
-jdbc-cli close mydb
+jdbc-cli close --alias mydb
 ```
 
 ## Credentials
