@@ -1,137 +1,73 @@
-# jdbc-cli — Spec
+# jdbc-cli spec
 
 ## Goal
 
-A CLI for ad-hoc SQL over JDBC that mirrors `officecli`'s resident-mode
-ergonomics: short-lived `jdbc-cli <subcmd>` invocations backed by a
-long-running daemon that keeps the JVM and a per-alias HikariCP pool warm.
-An agent can fire 20 small queries in a row without paying JVM cold-start
-or JDBC connect cost on each one.
+Keep the original CLI contract while replacing the Kotlin/JVM implementation with Go.
 
-The same daemon is the future backend for the dynamic MySQL MCP shim
-([2026-05-05 follow-up](https://example.invalid/)) — one connection pool,
-two front-ends.
+## Hard requirements
 
-## Non-goals (v1)
+1. Keep the command surface compatible:
+   - `ping`, `open`, `close`, `list`, `query`, `exec`, `schema`, `describe`, `begin`, `commit`, `rollback`, `batch`
+   - same flag names, especially `--jdbc-url`
+   - same old-style positional SQL usage for `query` and `exec`
+2. Keep the daemon/client split over a Unix domain socket at `~/.jdbc-cli/sock`.
+3. Keep named aliases with one optional active transaction per alias.
+4. Keep output contracts:
+   - `query` default: TSV with header row
+   - `query --json`: typed JSON rows
+   - `exec`: `{"rowsAffected":N}`
+   - mutation commands: `{"ok":true}`
+   - `batch`: continue after per-line errors and honor per-op `"json":true` on query ops
+5. Resulting binary must be self-contained:
+   - no JVM
+   - no JDBC jars
+   - no external DB client binaries
+   - no CGO dependency for SQLite
 
-- Lazy/dynamic driver loading (Coursier `URLClassLoader`). v1 fat-jars three drivers.
-- MCP front-end. v1 ships only the CLI front-end.
-- Result paging, server-side cursors, audit log.
-- Windows or Linux support. macOS only (launchd, Keychain, Homebrew paths).
-- Multi-user. The daemon assumes a single Unix user; socket is `0600`.
+## Implementation
 
-## Drivers (v1)
+### Binary layout
 
-Bundled in the fat-jar:
+One Go binary dispatches between:
 
-| DB         | Maven coordinates                           |
-| ---------- | ------------------------------------------- |
-| MySQL      | `com.mysql:mysql-connector-j:9.4.0`         |
-| PostgreSQL | `org.postgresql:postgresql:42.7.4`          |
-| SQLite     | `org.xerial:sqlite-jdbc:3.46.1.3`           |
+- client mode: normal CLI usage
+- daemon mode: internal background service started by launchd
 
-Adding a driver post-v1 = bump Gradle deps + rebuild fat-jar. Lazy
-Coursier loading is a v2 concern.
+### Transport
 
-## CLI surface
+- HTTP over a Unix domain socket
+- plain JSON request bodies
+- plain JSON or TSV response bodies
 
-```
-jdbc-cli daemon                                          # foreground, used by launchd
-jdbc-cli list                                            # active aliases (JSON array)
-jdbc-cli open    --alias <a> --jdbc-url <u> \
-                 --user <u> [--password-stdin | --password-keychain <service>]
-jdbc-cli query   --alias <a> "SELECT ..." [--json]
-jdbc-cli exec    --alias <a> "UPDATE ..."
-jdbc-cli schema  --alias <a>                             # list tables
-jdbc-cli describe --alias <a> --table <t>
-jdbc-cli begin   --alias <a>
-jdbc-cli commit  --alias <a>
-jdbc-cli rollback --alias <a>
-jdbc-cli close   --alias <a>
-jdbc-cli batch   --alias <a> < ops.jsonl                 # NDJSON ops
-jdbc-cli ping                                            # daemon liveness check
-```
+### Database support
 
-### Output
+`--jdbc-url` is translated to native Go drivers:
 
-- Default for `query`/`schema`/`describe`: TSV with header row.
-- `--json`: array of objects with **typed** values (numbers as JSON
-  numbers, booleans as `true`/`false`, NULL as `null`, dates/timestamps
-  as ISO-8601 strings, BLOBs as base64).
-- Errors: exit non-zero; one-line JSON `{"error":"..."}` on stderr.
+- MySQL -> `github.com/go-sql-driver/mysql`
+- PostgreSQL -> `github.com/jackc/pgx/v5/stdlib`
+- SQLite -> `modernc.org/sqlite`
 
-### Credentials
+SQLite is pure Go so the binary stays self-contained.
 
-Two paths, both keep the password off `argv`:
+### Compatibility notes
 
-1. **`op run`** — pipe via stdin:
-   ```bash
-   op run --env-file=secrets.env -- bash -c '
-     printf "%s" "$DB_PASSWORD" | jdbc-cli open \
-       --alias prod --jdbc-url jdbc:mysql://… --user root --password-stdin
-   '
-   ```
-2. **Keychain** — daemon reads on `open`:
-   ```bash
-   security add-generic-password -s jdbc-cli/prod -a root -w 'pwd'
-   jdbc-cli open --alias prod --jdbc-url … --user root \
-                 --password-keychain jdbc-cli/prod
-   ```
-   Daemon shells out to `security find-generic-password -s <service> -a <user> -w`.
+- `ping` stays as the daemon liveness check.
+- `query` / `exec` accept the original positional SQL form, while `--sql` is still accepted as a compatibility fallback.
+- `jdbc:sqlite::memory:` is pinned to a single SQLite connection so memory databases behave the same across commands.
+- `schema` and `describe` use dialect-specific metadata queries.
+- `read-only` is enforced in the daemon for `exec`.
 
-The password is stored only inside the Hikari pool object. `close`
-destroys the pool and drops the reference.
+### Packaging
 
-## Transport
+- build with `CGO_ENABLED=0`
+- install a launchd agent that runs `jdbc-cli daemon`
+- install a thin shell wrapper at `/opt/homebrew/bin/jdbc-cli`
 
-HTTP/1.1 over a Unix domain socket at `~/.jdbc-cli/sock` (mode `0600`).
-Jetty 12 `UnixDomainServerConnector`. Curl-debuggable:
+## Acceptance checks
 
-```bash
-curl --unix-socket ~/.jdbc-cli/sock http://localhost/list
-```
-
-Routes:
-
-| Method | Path           | Body                              | Returns          |
-| ------ | -------------- | --------------------------------- | ---------------- |
-| GET    | `/ping`        | —                                 | `"ok"`           |
-| GET    | `/list`        | —                                 | `[alias, ...]`   |
-| POST   | `/open`        | `{alias, jdbcUrl, user, pass}`    | `"ok"`           |
-| POST   | `/close`       | `{alias}`                         | `"ok"`           |
-| POST   | `/query`       | `{alias, sql}`                    | `[{col: val}]`   |
-| POST   | `/exec`        | `{alias, sql}`                    | `{updated: N}`   |
-| POST   | `/schema`      | `{alias}`                         | `[{table, …}]`   |
-| POST   | `/describe`    | `{alias, table}`                  | `[{column, …}]`  |
-| POST   | `/begin`       | `{alias}`                         | `"ok"`           |
-| POST   | `/commit`      | `{alias}`                         | `"ok"`           |
-| POST   | `/rollback`    | `{alias}`                         | `"ok"`           |
-| POST   | `/batch`       | NDJSON of op objects              | NDJSON results   |
-
-## Lifecycle
-
-- launchd plist at `~/Library/LaunchAgents/com.scriptease.jdbc-cli.plist`,
-  `KeepAlive=true`, `RunAtLoad=true`.
-- Daemon clears `~/.jdbc-cli/sock` on startup, binds, sets mode `0600`.
-- On `SIGTERM`: walk pools, `close()` each, exit 0. launchd revives it.
-- Aliases are **not persisted** across restarts. Re-`open` after a crash.
-
-## Acceptance tests
-
-All run against real databases stood up in the playbook.
-
-1. `jdbc-cli ping` returns `ok` with a fresh launchd-managed daemon.
-2. `jdbc-cli open --alias t --jdbc-url jdbc:sqlite::memory: --user "" --password-stdin <<<""` then `jdbc-cli list` includes `t`.
-3. Round-trip against MySQL: `open` → `exec "CREATE TABLE …"` → `exec "INSERT …"` → `query "SELECT …"` returns the inserted rows; `--json` produces typed values (int, string, null).
-4. Round-trip against Postgres equivalent.
-5. Transaction: `begin` → `exec UPDATE` → `query` (sees the change) → `rollback` → `query` (change gone).
-6. Two aliases concurrent: opens against MySQL and Postgres in parallel; queries against both in interleaved sequence; both succeed.
-7. `op run` flow: password reaches daemon via stdin; `ps auxww` during the call shows no `--password=…`.
-8. Keychain flow: `--password-keychain svc/acct` opens pool; same `ps` check passes.
-9. Crash-survival: `pkill -f jdbc-cli.jar` → launchd respawns within 5 s → `ping` returns `ok`; aliases are gone (expected).
-10. SIGTERM: open alias, `launchctl kickstart -k …`; daemon logs show clean pool close (no Hikari "leaked connection" warnings).
-
-## Out of scope for this spec
-
-Driver hot-loading, MCP front-end, paging, audit log, query timeout
-flags, multiple concurrent transactions per alias. All deferred.
+1. Open MySQL, PostgreSQL, and SQLite aliases using the existing flag contract.
+2. Run `ping`, then run queries in TSV and JSON mode.
+3. Run `begin` / `commit` / `rollback` against an alias.
+4. Reject `exec` on a read-only alias.
+5. Confirm batch query ops honor their JSON flag.
+6. Confirm the built binary runs without Java or external database client software.

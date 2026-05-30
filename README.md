@@ -1,101 +1,108 @@
 # jdbc-cli
 
-CLI for talking to SQL databases over JDBC, backed by a resident daemon so
-the JVM and connection pools stay warm between calls. Same shape as
-`officecli`'s `open … close` model.
+`jdbc-cli` is a macOS SQL CLI with a background daemon that keeps named database connections open across commands.
 
-- Daemon: Kotlin + Jetty (HTTP over Unix domain socket) + HikariCP
-- Drivers bundled in v1: MySQL, PostgreSQL, SQLite
-- Credentials via `op run` or macOS Keychain — never via argv
-- Single fat-jar; `jdbc-cli` shell wrapper invokes `java -jar …`
+This `Go` branch keeps the outside interface compatible with the original project:
+
+- same subcommands and flags
+- same alias + transaction model
+- same Unix-socket daemon/client split
+- same default TSV / optional JSON / NDJSON batch outputs
+- same `--jdbc-url` flag for connection strings
+
+The implementation is now a **single self-contained Go binary**. It does **not** require Java, JDBC drivers, `mysql`, `psql`, `sqlite3`, or any other runtime/client software to be installed. SQLite support is pure Go, and MySQL/PostgreSQL use native Go drivers. The only external commands involved are macOS built-ins for optional launchd install and optional Keychain lookup.
+
+## Supported URLs
+
+`--jdbc-url` is kept for compatibility even though the implementation is no longer JDBC-based.
+
+- MySQL: `jdbc:mysql://localhost:3306/app`
+- PostgreSQL: `jdbc:postgresql://localhost:5432/app`
+- SQLite file: `jdbc:sqlite:/tmp/app.db`
+- SQLite memory: `jdbc:sqlite::memory:`
 
 ## Install
 
-```sh
-# From repo root — builds fat-jar, installs wrapper + launchd plist, starts daemon
-bash scripts/install.sh
+```bash
+./scripts/install.sh
 ```
 
-Verify the daemon is up:
+That script builds the binary with `CGO_ENABLED=0`, installs it to `~/.local/share/jdbc-cli/jdbc-cli`, writes a launchd agent, and drops a wrapper at `/opt/homebrew/bin/jdbc-cli`.
 
-```sh
-jdbc-cli ping   # → ok
+You only need Go to build from source. Once built, the resulting `jdbc-cli` binary is standalone and can be copied to another compatible macOS machine without installing Java or database client libraries.
+
+## Commands
+
+```text
+jdbc-cli ping
+jdbc-cli open --alias A --jdbc-url URL [--user U] [--password-stdin|--password-keychain S] [--read-only]
+jdbc-cli close --alias A
+jdbc-cli list
+jdbc-cli query --alias A [--json] 'select ...'
+jdbc-cli exec --alias A 'update ...'
+jdbc-cli schema --alias A
+jdbc-cli describe --alias A --table T
+jdbc-cli begin --alias A
+jdbc-cli commit --alias A
+jdbc-cli rollback --alias A
+jdbc-cli batch [--alias A]
 ```
 
-Restart if needed:
+## Examples
 
-```sh
-launchctl kickstart -k gui/$(id -u)/com.scriptease.jdbc-cli
+```bash
+jdbc-cli ping
+jdbc-cli open --alias pg --jdbc-url jdbc:postgresql://localhost:5432/app --user app --password-stdin
+jdbc-cli query --alias pg 'select now()'
+jdbc-cli query --alias pg --json 'select id, email from users order by id limit 10'
+jdbc-cli exec --alias pg "update users set active = false where last_login < now() - interval '1 year'"
+jdbc-cli schema --alias pg
+jdbc-cli describe --alias pg --table users
 ```
 
-Logs: `~/.jdbc-cli/log`
+SQLite:
 
-## Help
-
-```sh
-jdbc-cli --help                  # list all subcommands
-jdbc-cli open --help             # flags for a specific subcommand
+```bash
+jdbc-cli open --alias mem --jdbc-url jdbc:sqlite::memory:
+jdbc-cli exec --alias mem 'create table t(id integer primary key, name text)'
+jdbc-cli exec --alias mem "insert into t(name) values ('Ada')"
+jdbc-cli query --alias mem 'select * from t'
 ```
 
-## First run
+Transactions:
 
-```sh
-# Add password to Keychain (one-time)
-security add-generic-password -s jdbc-cli/mydb -a myuser -w mysecret
-
-# Open a connection pool
-jdbc-cli open \
-  --alias mydb \
-  --jdbc-url "jdbc:mysql://localhost:3306/myschema" \
-  --user myuser \
-  --password-keychain jdbc-cli/mydb
-
-# Open a read-only connection (blocks exec/begin/commit/rollback)
-jdbc-cli open \
-  --alias mydb-ro \
-  --jdbc-url "jdbc:mysql://localhost:3306/myschema" \
-  --user myuser \
-  --password-keychain jdbc-cli/mydb \
-  --read-only
-
-# Run a query (TSV with header by default)
-jdbc-cli query --alias mydb "SELECT id, name FROM users LIMIT 5"
-
-# Typed JSON output
-jdbc-cli query --alias mydb --json "SELECT * FROM orders WHERE id = 1"
-
-# Explore schema
-jdbc-cli schema   --alias mydb              # list tables
-jdbc-cli describe --alias mydb --table users  # columns for a table
-
-# Write
-jdbc-cli exec --alias mydb "UPDATE users SET active = 1 WHERE id = 42"
-
-# Transaction
-jdbc-cli begin  --alias mydb
-jdbc-cli exec   --alias mydb "INSERT INTO events (type) VALUES ('login')"
-jdbc-cli commit --alias mydb     # or: jdbc-cli rollback --alias mydb
-
-# Batch (NDJSON — one op per line, results streamed back as NDJSON)
-printf '{"op":"query","sql":"SELECT 1"}\n{"op":"query","sql":"SELECT 2"}\n' \
-  | jdbc-cli batch --alias mydb
-
-# Done — release the pool
-jdbc-cli close --alias mydb
+```bash
+jdbc-cli begin --alias pg
+jdbc-cli exec --alias pg "insert into audit_log(message) values ('hello')"
+jdbc-cli rollback --alias pg
 ```
 
-## Credentials
+## Batch mode
 
-| Method | How |
-|--------|-----|
-| macOS Keychain | `security add-generic-password -s jdbc-cli/ALIAS -a USER -w PASSWORD` then pass `--password-keychain jdbc-cli/ALIAS` |
-| 1Password | Wrap invocation: `op run --env-file=.env -- jdbc-cli open …` with `JDBC_PASSWORD` in the env file, then pass `--password-env JDBC_PASSWORD` |
+Input is NDJSON on stdin. `query` returns TSV by default or JSON when the line includes `"json":true`; `exec` returns `{"rowsAffected":...}`, and transaction commands return `{"ok":true}`.
 
-Never pass the password via `--password` — it is visible in `ps`.
+```bash
+printf '%s\n' \
+  '{"op":"begin"}' \
+  '{"op":"exec","sql":"create table if not exists t(id integer)"}' \
+  '{"op":"exec","sql":"insert into t(id) values (1)"}' \
+  '{"op":"query","sql":"select * from t","json":true}' \
+  '{"op":"commit"}' \
+  | jdbc-cli batch --alias mem
+```
 
-## Reference
+## Passwords
 
-- [`docs/spec.md`](docs/spec.md) — full specification
-- [`docs/plan.md`](docs/plan.md) — implementation plan
-- [`docs/credentials.md`](docs/credentials.md) — credential setup in depth
-- [`skill/SKILL.md`](skill/SKILL.md) — AI agent skill reference
+`--password-stdin` reads the password from stdin.
+
+`--password-keychain SERVICE` reads it from the macOS Keychain entry stored like this:
+
+```bash
+security add-generic-password -a jdbc-cli -s SERVICE -w 'secret'
+```
+
+## Runtime files
+
+- Socket: `~/.jdbc-cli/sock`
+- launchd logs: `~/Library/Logs/jdbc-cli/daemon.log`
+- launchd stderr: `~/Library/Logs/jdbc-cli/daemon.err.log`

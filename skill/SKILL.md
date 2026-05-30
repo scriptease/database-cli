@@ -1,14 +1,18 @@
 ---
 name: jdbc-cli
-description: "Query and modify SQL databases over JDBC with persistent sessions backed by a resident daemon. Use for ad-hoc queries, schema inspection, transactions across multiple agent steps, and repeat-shape query loops where JVM and connect cold-start would dominate. Bundled drivers (v1): MySQL, PostgreSQL, SQLite."
+description: "Query and modify SQL databases with persistent sessions backed by a resident daemon. Use for ad-hoc queries, schema inspection, transactions across multiple agent steps, and repeat-shape query loops where connect cold-start would dominate. Supported engines: MySQL, PostgreSQL, SQLite."
 ---
 
 # jdbc-cli
 
-A CLI for talking to SQL databases over JDBC. The daemon stays running
-under launchd; each `jdbc-cli <subcmd>` is a short-lived call that hits
-the daemon over a Unix socket. Connection pools (HikariCP) are kept warm
-**per alias** between calls.
+A CLI for talking to SQL databases through a long-lived local daemon.
+The skill stays functionally the same as before; the only goal difference
+on this branch is internal: the implementation is now a self-contained Go
+binary instead of a JVM/JDBC fat-jar.
+
+The daemon stays running under launchd; each `jdbc-cli <subcmd>` is a
+short-lived call that hits the daemon over a Unix socket. Connection
+pools are kept warm **per alias** between calls.
 
 ## Help
 
@@ -26,7 +30,7 @@ jdbc-cli <subcommand> --help     # flags and usage for a specific subcommand
 ## When **not** to use
 
 - One-off `SELECT` against a DB you'll never touch again — `mysql`/`psql`/`sqlite3` are simpler.
-- Any DB outside MySQL / PostgreSQL / SQLite (until v2 lazy driver loading lands).
+- Any DB outside MySQL / PostgreSQL / SQLite (until broader driver support lands).
 - You need server-side cursors, paging, or audit logs (deferred to v2).
 
 ## Launch
@@ -99,20 +103,21 @@ jdbc-cli commit   --alias prod-shop      # or: rollback
 ```
 
 The pinned connection is dedicated to this alias from `begin` until
-`commit`/`rollback`. Other aliases are unaffected.
+`commit` / `rollback`. Other aliases are unaffected.
 
 ## Credentials — never put passwords on argv
 
 ### `op run` (1Password)
 
 ```bash
-op run --env-file=- -- bash -c '
+DB_PASSWORD='op://Caperwhite/prod-shop/password' \
+op run -- bash -c '
   printf "%s" "$DB_PASSWORD" | jdbc-cli open \
     --alias prod-shop \
     --jdbc-url jdbc:mysql://localhost:3306/shop \
     --user root \
     --password-stdin
-' <<<'DB_PASSWORD=op://Caperwhite/prod-shop/password'
+'
 ```
 
 ### macOS Keychain
@@ -140,11 +145,11 @@ call after a reboot may show a Keychain GUI prompt; allow once.
 - Default: TSV with a header row (`column<TAB>column<TAB>…`, then rows).
 - `--json`: array of objects with **typed** values:
   - integers → JSON numbers
-  - booleans → `true`/`false`
+  - booleans → `true` / `false`
   - NULL → `null`
-  - DATE/TIME/TIMESTAMP → ISO-8601 strings
+  - DATE / TIME / TIMESTAMP → ISO-8601 strings
   - BLOB → base64 string
-  - NUMERIC/DECIMAL → string (precision preserved)
+  - NUMERIC / DECIMAL → string (precision preserved)
 
 ## Batch mode
 
@@ -171,10 +176,10 @@ connection.
 | Pitfall                                  | Correct approach                                           |
 | ---------------------------------------- | ---------------------------------------------------------- |
 | `--password 'secret'` on argv            | Visible in `ps`. Use `--password-stdin` or `--password-keychain`. |
-| `exec` on a read-only alias              | Daemon returns `{"error":"alias '…' is read-only"}`. Open with `--read-only` intentionally to enforce safety; don't use it if you need writes. |
-| Forgetting `close`                       | Leaks a Hikari pool. Always pair `open`/`close`.           |
+| `exec` on a read-only alias              | Daemon returns `{"error":"alias is read-only: …"}`. Open with `--read-only` intentionally to enforce safety; don't use it if you need writes. |
+| Forgetting `close`                       | Keeps the alias and pool open. Always pair `open` / `close`. |
 | Transaction across two terminals         | One alias = one tx state. Use the same alias for all steps.|
-| "no suitable driver" after install       | Shadow `mergeServiceFiles()` missing. Re-run `./gradlew shadowJar` and reinstall. |
+| Wrapper missing after install            | Re-run `bash scripts/install.sh` to rebuild and reinstall. |
 | Aliases gone after a reboot              | Expected — aliases are not persisted. Re-`open`.           |
 | `query` returns string `"42"` not number | Add `--json` for typed values; default TSV is text.        |
 
@@ -190,12 +195,13 @@ Recover by re-`open`ing the aliases you need.
 
 ## Logs
 
-```
-~/.jdbc-cli/log
+```bash
+~/Library/Logs/jdbc-cli/daemon.log
+~/Library/Logs/jdbc-cli/daemon.err.log
 ```
 
-launchd appends both stdout and stderr there. Tail when debugging:
+Tail when debugging:
 
 ```bash
-tail -f ~/.jdbc-cli/log
+tail -f ~/Library/Logs/jdbc-cli/daemon.log ~/Library/Logs/jdbc-cli/daemon.err.log
 ```

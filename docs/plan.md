@@ -2,37 +2,49 @@
 
 ## Architecture
 
-Single Kotlin program, single fat-jar. `Main.kt` dispatches on `argv[0]`:
+Single Go program, single self-contained binary. `main.go` dispatches on
+`argv[0]`:
 
 ```
-jdbc-cli daemon            → DaemonMain.run()        # blocks
-jdbc-cli <anything else>   → ClientMain.run(argv)    # short-lived
+jdbc-cli daemon            → daemon.Run()      # blocks
+jdbc-cli <anything else>   → cli.Run(argv)     # short-lived
 ```
 
-Daemon and client share serialization types but never share process state.
+Daemon and client share protocol types but never share process state.
 
 ```
-┌──────────────────────────────────────────────────┐
-│ jdbc-cli daemon  (one process, supervised by launchd)
-│
-│   Jetty (UnixDomainServerConnector)
-│       └── /open /close /query /exec /…  (HTTP/1.1)
-│              │
-│              ▼
-│       Pools: Map<alias, HikariDataSource>
-│       TxConns: Map<alias, Connection>     (pinned during BEGIN…COMMIT)
-│              │
-│              ▼
-│       JDBC: MySQL | PostgreSQL | SQLite (drivers bundled)
-└──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ jdbc-cli daemon  (one process, supervised by launchd)      │
+│                                                            │
+│   net/http over Unix domain socket                         │
+│       └── /open /close /query /exec /…                     │
+│              │                                             │
+│              ▼                                             │
+│       Store: Map<alias, *sql.DB>                           │
+│       Tx:    Map<alias, *sql.Tx>   (pinned during          │
+│                                     BEGIN…COMMIT)          │
+│              │                                             │
+│              ▼                                             │
+│       database/sql + native Go drivers                     │
+│       MySQL | PostgreSQL | SQLite                          │
+└────────────────────────────────────────────────────────────┘
                   ▲
                   │ HTTP over ~/.jdbc-cli/sock (0600)
                   │
-┌──────────────────────────────────────────────────┐
-│ jdbc-cli <subcmd>  (short-lived per call)
-│   parses argv → builds JSON request → POSTs over UDS → prints response
-└──────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ jdbc-cli <subcmd>  (short-lived per call)                  │
+│   parses argv → builds JSON request → POSTs over UDS       │
+│   → prints response                                        │
+└────────────────────────────────────────────────────────────┘
 ```
+
+## Go-port note
+
+The goal difference on this branch is internal, not external:
+
+- keep the CLI/daemon contract effectively the same
+- replace the JVM fat-jar with a self-contained Go binary
+- remove the runtime requirement for Java, JDBC jars, or external DB clients
 
 ## File layout
 
@@ -42,136 +54,127 @@ Daemon and client share serialization types but never share process state.
 ├── docs/
 │   ├── spec.md
 │   └── plan.md
-├── autorun/
-│   └── JDBC-CLI-01.md             # playbook
 ├── skill/
-│   └── SKILL.md                   # agent-facing usage skill
-├── settings.gradle.kts
-├── build.gradle.kts               # Kotlin JVM, Shadow plugin for fat-jar
-├── gradle/wrapper/…
-├── gradlew
-├── src/main/kotlin/com/florian/jdbccli/
-│   ├── Main.kt                    # argv dispatch
+│   └── SKILL.md
+├── go.mod
+├── go.sum
+├── main.go
+├── internal/
+│   ├── cli/
+│   │   └── cli.go
+│   ├── client/
+│   │   └── http.go
 │   ├── daemon/
-│   │   ├── DaemonMain.kt          # Jetty bootstrap, signal handling
-│   │   ├── Routes.kt              # /open /close /query /…
-│   │   ├── Pools.kt               # alias → HikariDataSource + tx map
-│   │   ├── ResultSets.kt          # ResultSet → typed JSON
-│   │   └── Keychain.kt            # `security find-generic-password -w`
-│   └── client/
-│       ├── ClientMain.kt          # argv parse, http call, pretty-print
-│       ├── ArgParse.kt            # `--alias`, `--json`, positional SQL
-│       └── HttpClient.kt          # JDK HttpClient + Unix-socket SocketChannel
-├── bin/
-│   └── jdbc-cli                   # wrapper template (installed to PATH)
+│   │   ├── jdbc.go
+│   │   ├── keychain.go
+│   │   ├── render.go
+│   │   ├── server.go
+│   │   └── store.go
+│   ├── jsonerror/
+│   │   └── jsonerror.go
+│   └── protocol/
+│       └── protocol.go
 ├── launchd/
-│   └── com.scriptease.jdbc-cli.plist # template
+│   └── com.scriptease.jdbc-cli.plist
 └── scripts/
-    └── install.sh                 # build, place wrapper, bootstrap launchd
+    └── install.sh
 ```
 
 ## Build
 
-`build.gradle.kts`:
+`go.mod`:
 
-- Kotlin 2.x JVM target 21
-- Plugins: `kotlin("jvm")`, `id("com.github.johnrengelman.shadow")`
+- Go 1.24
 - Dependencies:
-  - `org.eclipse.jetty:jetty-server:12.0.x`
-  - `org.eclipse.jetty:jetty-unixdomain-server:12.0.x`
-  - `com.zaxxer:HikariCP:5.1.0`
-  - `org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3`
-  - `com.mysql:mysql-connector-j:9.4.0`
-  - `org.postgresql:postgresql:42.7.4`
-  - `org.xerial:sqlite-jdbc:3.46.1.3`
-  - `org.slf4j:slf4j-simple:2.0.x` (Hikari/Jetty logging)
-- Shadow output: `build/libs/jdbc-cli-all.jar`
-- Manifest `Main-Class: com.scriptease.jdbccli.MainKt`
+  - `github.com/go-sql-driver/mysql`
+  - `github.com/jackc/pgx/v5/stdlib`
+  - `modernc.org/sqlite`
+- Build output: `build/jdbc-cli`
+- Installer build flags: `CGO_ENABLED=0`, `-trimpath`, `-ldflags="-s -w"`
 
 ## Wrapper
 
-Mirrors the Maestro pattern. Installed to `/opt/homebrew/bin/jdbc-cli`:
+Mirrors the old install shape. Installed to `/opt/homebrew/bin/jdbc-cli`:
 
 ```bash
-#!/bin/bash
-exec /opt/homebrew/opt/openjdk@21/bin/java \
-     -jar /Users/florian/github/jdbc-cli/build/libs/jdbc-cli-all.jar "$@"
+#!/usr/bin/env bash
+set -euo pipefail
+exec "$HOME/.local/share/jdbc-cli/jdbc-cli" "$@"
 ```
 
-Created by `scripts/install.sh` via `tee` + `chmod +x` (no sudo on
-`/opt/homebrew/bin` for Homebrew users).
+Created by `scripts/install.sh`, which also installs the launchd plist and
+boots the daemon.
 
 ## Client transport
 
-JDK 17+ has `UnixDomainSocketAddress` and `SocketChannel.open(UNIX)`,
-but `java.net.http.HttpClient` does **not** speak HTTP over Unix
-sockets. Two options for the client:
+The short-lived CLI process uses `net/http` with a custom `Transport` that
+dials the Unix socket directly:
 
-1. Hand-roll a minimal HTTP/1.1 request writer + response parser on top
-   of the `SocketChannel`. ~60 LOC. Zero deps. **Pick this** — it's a
-   short-lived process; we don't need streaming or chunked.
-2. Add Apache HttpClient 5 with a custom `ConnectionSocketFactory` for
-   Unix sockets. Heavier, more dependency surface.
+```go
+transport := &http.Transport{
+    DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+        return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+    },
+}
+```
+
+That keeps the client tiny and dependency-free while preserving the same
+daemon architecture.
 
 ## Server transport
 
-Jetty 12 supports Unix sockets via:
+The daemon uses:
 
-```kotlin
-val server = Server()
-val connector = UnixDomainServerConnector(server).apply {
-    unixDomainPath = Path.of(System.getenv("HOME"), ".jdbc-cli/sock")
-}
-server.addConnector(connector)
+```go
+listener, _ := net.Listen("unix", socketPath)
+server := &http.Server{Handler: routes(store)}
+server.Serve(listener)
 ```
 
-After `server.start()`, `chmod 0600` the socket file.
+After binding, the socket file is chmodded to `0600`.
 
-## Typed JSON for ResultSet
+## Typed JSON for rows
 
-In `ResultSets.kt`, switch on `ResultSetMetaData.getColumnType(i)`:
+In `render.go`, switch on the scanned Go value and the reported DB type:
 
-| `java.sql.Types`                    | JSON                       |
-| ----------------------------------- | -------------------------- |
-| `BIT`, `BOOLEAN`                    | `true`/`false`             |
-| `TINYINT`…`BIGINT`                  | JSON number                |
-| `REAL`, `FLOAT`, `DOUBLE`           | JSON number                |
-| `NUMERIC`, `DECIMAL`                | string (preserve precision)|
-| `CHAR`, `VARCHAR`, `LONGVARCHAR`    | string                     |
-| `DATE`, `TIME`, `TIMESTAMP`, `…_WITH_TIMEZONE` | ISO-8601 string |
-| `BINARY`, `VARBINARY`, `BLOB`       | base64 string              |
-| `NULL` / `wasNull()`                | `null`                     |
-| Anything else                       | `getString()` fallback     |
+| DB / Go shape                          | JSON                        |
+| -------------------------------------- | --------------------------- |
+| booleans                               | `true` / `false`            |
+| integer types                          | JSON number                 |
+| float types                            | JSON number                 |
+| `NUMERIC`, `DECIMAL`                   | string (preserve precision) |
+| text types                             | string                      |
+| `time.Time`                            | ISO-8601 string             |
+| binary types                           | base64 string               |
+| `NULL`                                 | `null`                      |
+| anything else                          | string fallback             |
 
 ## Phases (each independently shippable)
 
 | #   | Scope                                                        | Acceptance                                          |
 | --- | ------------------------------------------------------------ | --------------------------------------------------- |
-| 1   | Gradle skeleton, fat-jar, `Main` dispatch, `daemon`+`ping`   | `jdbc-cli ping` returns `ok`                        |
-| 2   | `open`/`close`/`list`, Hikari pool, MySQL+Postgres+SQLite    | open SQLite `:memory:`, list, close (acceptance #2) |
-| 3   | `query`/`exec`/`schema`/`describe` + typed JSON              | acceptance #3 (MySQL round-trip)                    |
-| 4   | Transactions (`begin`/`commit`/`rollback` with pinned conn)  | acceptance #5                                       |
-| 5   | Keychain creds + `op run` doc + `--password-stdin`           | acceptances #7, #8                                  |
-| 6   | launchd plist + `install.sh` wrapper                         | acceptances #1, #9, #10                             |
-| 7   | `batch` (NDJSON), concurrency hardening (virtual threads)    | acceptance #6                                       |
-| 8   | `SKILL.md` polish + README finalize                          | manual review                                       |
-
-Phases 1–7 are mergeable to `main` independently. Phase 8 is doc-only.
+| 1   | Go module skeleton, `main` dispatch, `daemon` + `ping`       | `jdbc-cli ping` returns `ok`                        |
+| 2   | `open` / `close` / `list`, native drivers, alias store       | open SQLite `:memory:`, list, close                 |
+| 3   | `query` / `exec` / `schema` / `describe` + typed JSON        | query + write round-trip works                      |
+| 4   | Transactions (`begin` / `commit` / `rollback`)               | rollback leaves row count unchanged                 |
+| 5   | Keychain creds + `--password-stdin`                          | both auth paths work                                |
+| 6   | launchd plist + install wrapper                              | install + kickstart + ping work                     |
+| 7   | `batch`, compatibility cleanup, docs restore                 | batch + old CLI shape work                          |
 
 ## What is **not** in this plan (deferred to v2)
 
-- Coursier-driven lazy driver loading.
+- Lazy driver loading beyond the built-in engines.
 - MCP front-end on the same daemon.
 - Result paging / cursor support.
 - Audit log of executed statements.
 - Per-query timeout / cancellation.
-- Linux/Windows support.
+- Linux/Windows packaging.
 - TLS-to-DB cert pinning helpers.
 
 ## Risks / open watch-items
 
-1. **Jetty 12 fat-jar size** — Jetty + 3 JDBC drivers ≈ 12–15 MB. Acceptable; flag if it balloons.
-2. **Shadow plugin + Kotlin 2.x compatibility** — occasionally lags. Fallback: plain `Jar` task with `from(configurations.runtimeClasspath.map { … })`.
-3. **`UnixDomainServerConnector` on macOS** — known to work, but socket path length limit (~104 chars). `~/.jdbc-cli/sock` is well under it.
-4. **JDBC driver auto-registration in fat-jar** — `META-INF/services/java.sql.Driver` files from each driver must be merged by Shadow (`mergeServiceFiles()`). Easy to forget; if forgotten, `DriverManager.getConnection` fails with "no suitable driver".
-5. **`security` CLI prompts for Keychain access** — first call may show a GUI prompt. Document in SKILL.md.
+1. **Unix socket path length on macOS** — the limit is still tight. `~/.jdbc-cli/sock` is safe; deep temp directories are not.
+2. **JDBC URL compatibility translation** — the outside interface stays `--jdbc-url`, so MySQL/PostgreSQL/SQLite parsing must remain stable.
+3. **SQLite memory semantics** — `:memory:` needs a single pooled connection or state disappears across commands.
+4. **Metadata differences across drivers** — `schema` and `describe` are dialect-specific, not one generic JDBC metadata path anymore.
+5. **Keychain prompts** — the first macOS Keychain lookup may still trigger a GUI approval prompt.
