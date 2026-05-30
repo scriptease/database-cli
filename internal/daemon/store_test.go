@@ -126,7 +126,7 @@ func TestStoreSQLiteMemoryPersistsAcrossCommands(t *testing.T) {
 	}
 }
 
-func TestStoreReadOnlyRejectsExecAndCloseRejectsActiveTransaction(t *testing.T) {
+func TestStoreReadOnlyRejectsMutationsAndCloseRejectsActiveTransaction(t *testing.T) {
 	store := newStore()
 	t.Cleanup(store.CloseAll)
 
@@ -161,6 +161,15 @@ func TestStoreReadOnlyRejectsExecAndCloseRejectsActiveTransaction(t *testing.T) 
 
 	if _, err := store.Exec("ro", "insert into items(name) values ('blocked')"); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("Exec(ro) error = %v, want read-only error", err)
+	}
+	if err := store.Begin("ro"); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("Begin(ro) error = %v, want read-only error", err)
+	}
+	if err := store.Commit("ro"); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("Commit(ro) error = %v, want read-only error", err)
+	}
+	if err := store.Rollback("ro"); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("Rollback(ro) error = %v, want read-only error", err)
 	}
 }
 
