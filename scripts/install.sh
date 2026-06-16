@@ -6,6 +6,7 @@ APP_HOME="$HOME/.local/share/database-cli"
 BIN_PATH="$APP_HOME/database-cli"
 WRAPPER_PATH="/opt/homebrew/bin/database-cli"
 PLIST_NAME="com.scriptease.database-cli.plist"
+SERVICE_NAME="com.scriptease.database-cli"
 PLIST_SOURCE="$ROOT/launchd/$PLIST_NAME"
 PLIST_TARGET="$HOME/Library/LaunchAgents/$PLIST_NAME"
 LOG_DIR="$HOME/Library/Logs/database-cli"
@@ -59,9 +60,9 @@ mv "$STAGED_BIN" "$BIN_PATH"
 mv "$PLIST_TMP" "$PLIST_TARGET"
 mv "$WRAPPER_TMP" "$WRAPPER_PATH"
 
-launchctl bootout "gui/$(id -u)/$PLIST_NAME" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/$SERVICE_NAME" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST_TARGET"
-launchctl kickstart -k "gui/$(id -u)/$PLIST_NAME"
+launchctl kickstart -k "gui/$(id -u)/$SERVICE_NAME"
 
 echo "Installed database-cli"
 echo "Binary:  $BIN_PATH"
