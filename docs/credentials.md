@@ -1,6 +1,6 @@
 # Credential Handling
 
-jdbc-cli supports two ways to pass a database password without exposing it in process args or shell history.
+database-cli supports two ways to pass a database password without exposing it in process args or shell history.
 
 ## Option 1 — macOS Keychain (`--password-keychain`)
 
@@ -14,7 +14,7 @@ security add-generic-password -s mydb -a myuser -w
 Open a connection using the keychain entry:
 
 ```sh
-jdbc-cli open --alias prod \
+database-cli open --alias prod \
   --jdbc-url jdbc:mysql://db.example.com:3306/mydb \
   --user myuser \
   --password-keychain "mydb/myuser"
@@ -36,7 +36,7 @@ Open using stdin:
 
 ```sh
 op run --env-file .env -- sh -c \
-  'echo "$JDBC_PASSWORD" | jdbc-cli open --alias prod \
+  'echo "$JDBC_PASSWORD" | database-cli open --alias prod \
     --jdbc-url jdbc:mysql://db.example.com:3306/mydb \
     --user myuser \
     --password-stdin'

@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/scriptease/jdbc-cli/internal/cli"
-	"github.com/scriptease/jdbc-cli/internal/daemon"
-	"github.com/scriptease/jdbc-cli/internal/jsonerror"
+	"github.com/scriptease/database-cli/internal/cli"
+	"github.com/scriptease/database-cli/internal/daemon"
+	"github.com/scriptease/database-cli/internal/jsonerror"
 )
 
 func main() {

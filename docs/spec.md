@@ -1,4 +1,4 @@
-# jdbc-cli spec
+# database-cli spec
 
 ## Goal
 
@@ -10,7 +10,7 @@ Keep the original CLI contract while replacing the Kotlin/JVM implementation wit
    - `ping`, `open`, `close`, `list`, `query`, `exec`, `schema`, `describe`, `begin`, `commit`, `rollback`, `batch`
    - same flag names, especially `--jdbc-url`
    - same old-style positional SQL usage for `query` and `exec`
-2. Keep the daemon/client split over a Unix domain socket at `~/.jdbc-cli/sock`.
+2. Keep the daemon/client split over a Unix domain socket at `~/.database-cli/sock`.
 3. Keep named aliases with one optional active transaction per alias.
 4. Keep output contracts:
    - `query` default: TSV with header row
@@ -60,8 +60,8 @@ SQLite is pure Go so the binary stays self-contained.
 ### Packaging
 
 - build with `CGO_ENABLED=0`
-- install a launchd agent that runs `jdbc-cli daemon`
-- install a thin shell wrapper at `/opt/homebrew/bin/jdbc-cli`
+- install a launchd agent that runs `database-cli daemon`
+- install a thin shell wrapper at `/opt/homebrew/bin/database-cli`
 
 ## Acceptance checks
 

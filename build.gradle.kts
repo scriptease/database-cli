@@ -27,7 +27,7 @@ kotlin {
 }
 
 tasks.shadowJar {
-    archiveBaseName.set("jdbc-cli")
+    archiveBaseName.set("database-cli")
     archiveClassifier.set("all")
     archiveVersion.set("")
     mergeServiceFiles()

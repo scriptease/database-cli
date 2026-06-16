@@ -12,7 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"github.com/scriptease/jdbc-cli/internal/protocol"
+	"github.com/scriptease/database-cli/internal/protocol"
 )
 
 type Store struct {

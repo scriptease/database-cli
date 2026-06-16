@@ -1,24 +1,24 @@
 ---
-name: jdbc-cli
+name: database-cli
 description: "Query and modify SQL databases with persistent sessions backed by a resident daemon. Use for ad-hoc queries, schema inspection, transactions across multiple agent steps, and repeat-shape query loops where connect cold-start would dominate. Supported engines: MySQL, PostgreSQL, SQLite."
 ---
 
-# jdbc-cli
+# database-cli
 
 A CLI for talking to SQL databases through a long-lived local daemon.
 The skill stays functionally the same as before; the only goal difference
 on this branch is internal: the implementation is now a self-contained Go
 binary instead of a JVM/JDBC fat-jar.
 
-The daemon stays running under launchd; each `jdbc-cli <subcmd>` is a
+The daemon stays running under launchd; each `database-cli <subcmd>` is a
 short-lived call that hits the daemon over a Unix socket. Connection
 pools are kept warm **per alias** between calls.
 
 ## Help
 
 ```bash
-jdbc-cli --help                  # list all subcommands and global flags
-jdbc-cli <subcommand> --help     # flags and usage for a specific subcommand
+database-cli --help                  # list all subcommands and global flags
+database-cli <subcommand> --help     # flags and usage for a specific subcommand
 ```
 
 ## When to use
@@ -39,15 +39,15 @@ The daemon is supervised by launchd; on a working install it's already
 running. To verify:
 
 ```bash
-jdbc-cli ping        # → ok
+database-cli ping        # → ok
 ```
 
 If `ping` errors with "daemon not running":
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.scriptease.jdbc-cli
+launchctl kickstart -k gui/$(id -u)/com.scriptease.database-cli
 sleep 1
-jdbc-cli ping
+database-cli ping
 ```
 
 If the wrapper itself is missing, re-run the installer from the repo root:
@@ -60,34 +60,34 @@ bash scripts/install.sh
 
 ```bash
 # Open (always pair with close)
-jdbc-cli open  --alias prod-shop \
+database-cli open  --alias prod-shop \
                --jdbc-url jdbc:mysql://localhost:3306/shop \
                --user root \
                --password-stdin                              # OR --password-keychain
 
 # Open read-only — exec/begin/commit/rollback are rejected by the daemon for this alias
-jdbc-cli open  --alias prod-shop-ro \
+database-cli open  --alias prod-shop-ro \
                --jdbc-url jdbc:mysql://localhost:3306/shop \
                --user root \
-               --password-keychain jdbc-cli/prod-shop \
+               --password-keychain database-cli/prod-shop \
                --read-only
 
 # Read
-jdbc-cli query --alias prod-shop "SELECT id, name FROM users LIMIT 10"
-jdbc-cli query --alias prod-shop --json "SELECT id, name FROM users LIMIT 10"
+database-cli query --alias prod-shop "SELECT id, name FROM users LIMIT 10"
+database-cli query --alias prod-shop --json "SELECT id, name FROM users LIMIT 10"
 
 # Write
-jdbc-cli exec  --alias prod-shop "UPDATE users SET active=1 WHERE id=42"
+database-cli exec  --alias prod-shop "UPDATE users SET active=1 WHERE id=42"
 
 # Inspect
-jdbc-cli schema   --alias prod-shop                          # all tables
-jdbc-cli describe --alias prod-shop --table users            # columns
+database-cli schema   --alias prod-shop                          # all tables
+database-cli describe --alias prod-shop --table users            # columns
 
 # Close (releases the pool)
-jdbc-cli close --alias prod-shop
+database-cli close --alias prod-shop
 
 # State
-jdbc-cli list                                                # active aliases
+database-cli list                                                # active aliases
 ```
 
 ## Transactions
@@ -95,11 +95,11 @@ jdbc-cli list                                                # active aliases
 One alias = one transaction state. Run all steps under the same alias.
 
 ```bash
-jdbc-cli begin    --alias prod-shop
-jdbc-cli exec     --alias prod-shop "UPDATE users SET active=0 WHERE id=42"
-jdbc-cli query    --alias prod-shop "SELECT active FROM users WHERE id=42"
+database-cli begin    --alias prod-shop
+database-cli exec     --alias prod-shop "UPDATE users SET active=0 WHERE id=42"
+database-cli query    --alias prod-shop "SELECT active FROM users WHERE id=42"
 # … decide …
-jdbc-cli commit   --alias prod-shop      # or: rollback
+database-cli commit   --alias prod-shop      # or: rollback
 ```
 
 The pinned connection is dedicated to this alias from `begin` until
@@ -112,7 +112,7 @@ The pinned connection is dedicated to this alias from `begin` until
 ```bash
 DB_PASSWORD='op://Caperwhite/prod-shop/password' \
 op run -- bash -c '
-  printf "%s" "$DB_PASSWORD" | jdbc-cli open \
+  printf "%s" "$DB_PASSWORD" | database-cli open \
     --alias prod-shop \
     --jdbc-url jdbc:mysql://localhost:3306/shop \
     --user root \
@@ -125,16 +125,16 @@ op run -- bash -c '
 One-time:
 
 ```bash
-security add-generic-password -s jdbc-cli/prod-shop -a root -w 'thepassword'
+security add-generic-password -s database-cli/prod-shop -a root -w 'thepassword'
 ```
 
 Each session:
 
 ```bash
-jdbc-cli open --alias prod-shop \
+database-cli open --alias prod-shop \
               --jdbc-url jdbc:mysql://localhost:3306/shop \
               --user root \
-              --password-keychain jdbc-cli/prod-shop
+              --password-keychain database-cli/prod-shop
 ```
 
 The daemon shells out to `security find-generic-password -w`. The first
@@ -154,7 +154,7 @@ call after a reboot may show a Keychain GUI prompt; allow once.
 ## Batch mode
 
 ```bash
-cat <<'EOF' | jdbc-cli batch --alias prod-shop
+cat <<'EOF' | database-cli batch --alias prod-shop
 {"op":"query","sql":"SELECT count(*) FROM users"}
 {"op":"query","sql":"SELECT count(*) FROM orders","json":true}
 {"op":"exec","sql":"UPDATE users SET active=1 WHERE id=42"}
@@ -189,19 +189,19 @@ If launchd respawns the daemon mid-session:
 
 - All aliases are gone (`list` returns `[]`).
 - Any open transaction is aborted server-side.
-- `jdbc-cli ping` returns `ok` again immediately.
+- `database-cli ping` returns `ok` again immediately.
 
 Recover by re-`open`ing the aliases you need.
 
 ## Logs
 
 ```bash
-~/Library/Logs/jdbc-cli/daemon.log
-~/Library/Logs/jdbc-cli/daemon.err.log
+~/Library/Logs/database-cli/daemon.log
+~/Library/Logs/database-cli/daemon.err.log
 ```
 
 Tail when debugging:
 
 ```bash
-tail -f ~/Library/Logs/jdbc-cli/daemon.log ~/Library/Logs/jdbc-cli/daemon.err.log
+tail -f ~/Library/Logs/database-cli/daemon.log ~/Library/Logs/database-cli/daemon.err.log
 ```

@@ -9,7 +9,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/scriptease/jdbc-cli/internal/jsonerror"
+	"github.com/scriptease/database-cli/internal/jsonerror"
 )
 
 type Client struct {

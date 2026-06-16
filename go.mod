@@ -1,4 +1,4 @@
-module github.com/scriptease/jdbc-cli
+module github.com/scriptease/database-cli
 
 go 1.25.0
 

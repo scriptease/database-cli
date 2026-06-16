@@ -57,7 +57,7 @@ func StateDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".jdbc-cli"), nil
+	return filepath.Join(home, ".database-cli"), nil
 }
 
 func SocketPath() (string, error) {

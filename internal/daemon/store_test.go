@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scriptease/jdbc-cli/internal/protocol"
+	"github.com/scriptease/database-cli/internal/protocol"
 )
 
 func TestStoreSQLiteLifecycle(t *testing.T) {

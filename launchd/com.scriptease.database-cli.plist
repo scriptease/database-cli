@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.scriptease.jdbc-cli</string>
+    <string>com.scriptease.database-cli</string>
 
     <key>ProgramArguments</key>
     <array>
@@ -21,9 +21,9 @@
     <string>__HOME__</string>
 
     <key>StandardOutPath</key>
-    <string>__HOME__/Library/Logs/jdbc-cli/daemon.log</string>
+    <string>__HOME__/Library/Logs/database-cli/daemon.log</string>
 
     <key>StandardErrorPath</key>
-    <string>__HOME__/Library/Logs/jdbc-cli/daemon.err.log</string>
+    <string>__HOME__/Library/Logs/database-cli/daemon.err.log</string>
 </dict>
 </plist>

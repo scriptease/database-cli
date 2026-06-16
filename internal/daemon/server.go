@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/scriptease/jdbc-cli/internal/protocol"
+	"github.com/scriptease/database-cli/internal/protocol"
 )
 
 func Run(args []string) error {
 	if len(args) > 0 {
 		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-			_, _ = fmt.Fprintln(os.Stdout, "jdbc-cli daemon")
+			_, _ = fmt.Fprintln(os.Stdout, "database-cli daemon")
 			return nil
 		}
 		return fmt.Errorf("daemon does not accept arguments")

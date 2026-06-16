@@ -1,4 +1,4 @@
-# jdbc-cli — Plan
+# database-cli — Plan
 
 ## Architecture
 
@@ -6,15 +6,15 @@ Single Go program, single self-contained binary. `main.go` dispatches on
 `argv[0]`:
 
 ```
-jdbc-cli daemon            → daemon.Run()      # blocks
-jdbc-cli <anything else>   → cli.Run(argv)     # short-lived
+database-cli daemon            → daemon.Run()      # blocks
+database-cli <anything else>   → cli.Run(argv)     # short-lived
 ```
 
 Daemon and client share protocol types but never share process state.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ jdbc-cli daemon  (one process, supervised by launchd)      │
+│ database-cli daemon  (one process, supervised by launchd)      │
 │                                                            │
 │   net/http over Unix domain socket                         │
 │       └── /open /close /query /exec /…                     │
@@ -29,10 +29,10 @@ Daemon and client share protocol types but never share process state.
 │       MySQL | PostgreSQL | SQLite                          │
 └────────────────────────────────────────────────────────────┘
                   ▲
-                  │ HTTP over ~/.jdbc-cli/sock (0600)
+                  │ HTTP over ~/.database-cli/sock (0600)
                   │
 ┌────────────────────────────────────────────────────────────┐
-│ jdbc-cli <subcmd>  (short-lived per call)                  │
+│ database-cli <subcmd>  (short-lived per call)                  │
 │   parses argv → builds JSON request → POSTs over UDS       │
 │   → prints response                                        │
 └────────────────────────────────────────────────────────────┘
@@ -49,7 +49,7 @@ The goal difference on this branch is internal, not external:
 ## File layout
 
 ```
-~/github/jdbc-cli/
+~/github/database-cli/
 ├── README.md
 ├── docs/
 │   ├── spec.md
@@ -75,7 +75,7 @@ The goal difference on this branch is internal, not external:
 │   └── protocol/
 │       └── protocol.go
 ├── launchd/
-│   └── com.scriptease.jdbc-cli.plist
+│   └── com.scriptease.database-cli.plist
 └── scripts/
     └── install.sh
 ```
@@ -89,17 +89,17 @@ The goal difference on this branch is internal, not external:
   - `github.com/go-sql-driver/mysql`
   - `github.com/jackc/pgx/v5/stdlib`
   - `modernc.org/sqlite`
-- Build output: `build/jdbc-cli`
+- Build output: `build/database-cli`
 - Installer build flags: `CGO_ENABLED=0`, `-trimpath`, `-ldflags="-s -w"`
 
 ## Wrapper
 
-Mirrors the old install shape. Installed to `/opt/homebrew/bin/jdbc-cli`:
+Mirrors the old install shape. Installed to `/opt/homebrew/bin/database-cli`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$HOME/.local/share/jdbc-cli/jdbc-cli" "$@"
+exec "$HOME/.local/share/database-cli/database-cli" "$@"
 ```
 
 Created by `scripts/install.sh`, which also installs the launchd plist and
@@ -153,7 +153,7 @@ In `render.go`, switch on the scanned Go value and the reported DB type:
 
 | #   | Scope                                                        | Acceptance                                          |
 | --- | ------------------------------------------------------------ | --------------------------------------------------- |
-| 1   | Go module skeleton, `main` dispatch, `daemon` + `ping`       | `jdbc-cli ping` returns `ok`                        |
+| 1   | Go module skeleton, `main` dispatch, `daemon` + `ping`       | `database-cli ping` returns `ok`                        |
 | 2   | `open` / `close` / `list`, native drivers, alias store       | open SQLite `:memory:`, list, close                 |
 | 3   | `query` / `exec` / `schema` / `describe` + typed JSON        | query + write round-trip works                      |
 | 4   | Transactions (`begin` / `commit` / `rollback`)               | rollback leaves row count unchanged                 |
@@ -173,7 +173,7 @@ In `render.go`, switch on the scanned Go value and the reported DB type:
 
 ## Risks / open watch-items
 
-1. **Unix socket path length on macOS** — the limit is still tight. `~/.jdbc-cli/sock` is safe; deep temp directories are not.
+1. **Unix socket path length on macOS** — the limit is still tight. `~/.database-cli/sock` is safe; deep temp directories are not.
 2. **JDBC URL compatibility translation** — the outside interface stays `--jdbc-url`, so MySQL/PostgreSQL/SQLite parsing must remain stable.
 3. **SQLite memory semantics** — `:memory:` needs a single pooled connection or state disappears across commands.
 4. **Metadata differences across drivers** — `schema` and `describe` are dialect-specific, not one generic JDBC metadata path anymore.

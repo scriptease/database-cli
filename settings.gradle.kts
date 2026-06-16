@@ -1,1 +1,1 @@
-rootProject.name = "jdbc-cli"
+rootProject.name = "database-cli"

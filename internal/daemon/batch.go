@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/scriptease/jdbc-cli/internal/protocol"
+	"github.com/scriptease/database-cli/internal/protocol"
 )
 
 func (s *Store) Batch(body []byte) ([]byte, error) {

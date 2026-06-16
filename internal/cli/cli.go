@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/scriptease/jdbc-cli/internal/client"
-	"github.com/scriptease/jdbc-cli/internal/protocol"
+	"github.com/scriptease/database-cli/internal/client"
+	"github.com/scriptease/database-cli/internal/protocol"
 )
 
-const topHelp = `jdbc-cli <subcommand> [flags] [args]
+const topHelp = `database-cli <subcommand> [flags] [args]
 
 Subcommands:
   ping                   Check if the daemon is running
@@ -32,7 +32,7 @@ Subcommands:
 Global flags:
   --help                 Show this help
 
-Run 'jdbc-cli <subcommand> --help' for subcommand-specific usage.
+Run 'database-cli <subcommand> --help' for subcommand-specific usage.
 `
 
 var boolFlags = map[string]struct{}{
@@ -344,19 +344,19 @@ func helpText(cmd string) string {
 		return `ping  Check if the daemon is running.
 
 Usage:
-  jdbc-cli ping
+  database-cli ping
 `
 	case "list":
 		return `list  List all open connection aliases.
 
 Usage:
-  jdbc-cli list
+  database-cli list
 `
 	case "open":
 		return `open  Open a new JDBC connection and register it under an alias.
 
 Usage:
-  jdbc-cli open --alias <name> --jdbc-url <url> [auth flags]
+  database-cli open --alias <name> --jdbc-url <url> [auth flags]
 
 Flags:
   --alias <name>               Alias to register this connection under (required)
@@ -370,7 +370,7 @@ Flags:
 		return `close  Close an open connection.
 
 Usage:
-  jdbc-cli close --alias <name>
+  database-cli close --alias <name>
 
 Flags:
   --alias <name>    Connection alias to close (required)
@@ -379,21 +379,21 @@ Flags:
 		return `query  Run a SELECT query and print results.
 
 Usage:
-  jdbc-cli query --alias <name> [--json] '<SQL>'
+  database-cli query --alias <name> [--json] '<SQL>'
 
 Flags:
   --alias <name>    Connection alias (required)
   --json            Output results as JSON array instead of TSV
 
 Example:
-  jdbc-cli query --alias mydb 'SELECT * FROM users LIMIT 10'
-  jdbc-cli query --alias mydb --json 'SELECT id, name FROM users'
+  database-cli query --alias mydb 'SELECT * FROM users LIMIT 10'
+  database-cli query --alias mydb --json 'SELECT id, name FROM users'
 `
 	case "exec":
 		return `exec  Run a write SQL statement (INSERT, UPDATE, DELETE, DDL).
 
 Usage:
-  jdbc-cli exec --alias <name> '<SQL>'
+  database-cli exec --alias <name> '<SQL>'
 
 Flags:
   --alias <name>    Connection alias (required)
@@ -407,7 +407,7 @@ Note: blocked if the alias was opened with --read-only.
 		return `schema  List all tables in the database.
 
 Usage:
-  jdbc-cli schema --alias <name>
+  database-cli schema --alias <name>
 
 Flags:
   --alias <name>    Connection alias (required)
@@ -416,7 +416,7 @@ Flags:
 		return `describe  Show column definitions for a table.
 
 Usage:
-  jdbc-cli describe --alias <name> --table <table>
+  database-cli describe --alias <name> --table <table>
 
 Flags:
   --alias <name>     Connection alias (required)
@@ -429,7 +429,7 @@ Output:
 		return `begin  Begin a transaction on the connection.
 
 Usage:
-  jdbc-cli begin --alias <name>
+  database-cli begin --alias <name>
 
 Flags:
   --alias <name>    Connection alias (required)
@@ -440,7 +440,7 @@ Note: blocked if the alias was opened with --read-only.
 		return `commit  Commit the current transaction.
 
 Usage:
-  jdbc-cli commit --alias <name>
+  database-cli commit --alias <name>
 
 Flags:
   --alias <name>    Connection alias (required)
@@ -451,7 +451,7 @@ Note: blocked if the alias was opened with --read-only.
 		return `rollback  Roll back the current transaction.
 
 Usage:
-  jdbc-cli rollback --alias <name>
+  database-cli rollback --alias <name>
 
 Flags:
   --alias <name>    Connection alias (required)
@@ -462,7 +462,7 @@ Note: blocked if the alias was opened with --read-only.
 		return `batch  Execute multiple operations from stdin in NDJSON format.
 
 Usage:
-  echo '<ndjson>' | jdbc-cli batch [--alias <default-alias>]
+  echo '<ndjson>' | database-cli batch [--alias <default-alias>]
 
 Flags:
   --alias <name>    Default alias injected into ops that omit it (optional)

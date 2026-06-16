@@ -2,15 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_HOME="$HOME/.local/share/jdbc-cli"
-BIN_PATH="$APP_HOME/jdbc-cli"
-WRAPPER_PATH="/opt/homebrew/bin/jdbc-cli"
-PLIST_NAME="com.scriptease.jdbc-cli.plist"
+APP_HOME="$HOME/.local/share/database-cli"
+BIN_PATH="$APP_HOME/database-cli"
+WRAPPER_PATH="/opt/homebrew/bin/database-cli"
+PLIST_NAME="com.scriptease.database-cli.plist"
 PLIST_SOURCE="$ROOT/launchd/$PLIST_NAME"
 PLIST_TARGET="$HOME/Library/LaunchAgents/$PLIST_NAME"
-LOG_DIR="$HOME/Library/Logs/jdbc-cli"
-BUILD_PATH="$ROOT/build/jdbc-cli"
-STAGED_BIN="$APP_HOME/.jdbc-cli.new"
+LOG_DIR="$HOME/Library/Logs/database-cli"
+BUILD_PATH="$ROOT/build/database-cli"
+STAGED_BIN="$APP_HOME/.database-cli.new"
 PLIST_TMP=""
 WRAPPER_TMP=""
 
@@ -32,6 +32,13 @@ mkdir -p "$ROOT/build" "$APP_HOME" "$HOME/Library/LaunchAgents" "$LOG_DIR" "$(di
   CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$BUILD_PATH" .
 )
 
+codesign --force \
+  --sign "${SIGN_IDENTITY:-Apple Distribution: CaperWhite GmbH (QVMS9F7W76)}" \
+  --timestamp \
+  --options runtime \
+  --identifier "com.scriptease.database-cli" \
+  "$BUILD_PATH"
+
 install -m 0755 "$BUILD_PATH" "$STAGED_BIN"
 
 PLIST_TMP="$(mktemp "$PLIST_TARGET.XXXXXX")"
@@ -45,7 +52,7 @@ WRAPPER_TMP="$(mktemp "$WRAPPER_PATH.XXXXXX")"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
-  'exec "$HOME/.local/share/jdbc-cli/jdbc-cli" "$@"' > "$WRAPPER_TMP"
+  'exec "$HOME/.local/share/database-cli/database-cli" "$@"' > "$WRAPPER_TMP"
 chmod 0755 "$WRAPPER_TMP"
 
 mv "$STAGED_BIN" "$BIN_PATH"
@@ -56,7 +63,7 @@ launchctl bootout "gui/$(id -u)/$PLIST_NAME" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST_TARGET"
 launchctl kickstart -k "gui/$(id -u)/$PLIST_NAME"
 
-echo "Installed jdbc-cli"
+echo "Installed database-cli"
 echo "Binary:  $BIN_PATH"
 echo "Wrapper: $WRAPPER_PATH"
 echo "Logs:    $LOG_DIR"
